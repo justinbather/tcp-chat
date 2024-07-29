@@ -2,8 +2,11 @@ package main
 
 import (
 	"fmt"
+	"io"
 	"net"
 )
+
+const MAX_CLIENTS int = 4
 
 // if we have a lobby which keeps an array of clients how should we keep the main thread open so we can accept new connections
 
@@ -14,7 +17,9 @@ import (
 
 func main() {
 
-	lobby := NewLobby()
+	totalClients := 0
+
+	clients := []*Client{}
 	listen, err := net.Listen("tcp", ":8000")
 	if err != nil {
 		return
@@ -31,30 +36,58 @@ func main() {
 			return
 		}
 
-		client := NewClient(conn)
+		if totalClients+1 > MAX_CLIENTS {
 
-		lobby.Clients = append(lobby.Clients, client)
+			fmt.Println("Cant handle any more clients")
+			return
+		}
 
-		go handleConn(client)
+		client := NewClient(conn, totalClients)
+
+		clients = append(clients, client)
+		totalClients++
+
+		handleConn(client)
 	}
 
 }
 
 func handleConn(client *Client) {
 
-	//this works we get a message. next is to setup the client to read from std in and send to this server upon \r
-	// after this we should work on sending messages to other connections
+	//need to wire up recieving message and putting it into other clients outgoing chan
+	go writeOutput(client.Conn, client.Outgoing)
+	go readInput(client.Conn, client.Incoming)
+	fmt.Println("Go routines started for user", client.Name)
+}
+
+func readInput(c net.Conn, in chan<- string) {
 	for {
-		message := make([]byte, 2048)
-		_, err := client.Conn.Read(message)
+		data, err := io.ReadAll(c)
 		if err != nil {
-			return
+			fmt.Println("error reading message", err)
+			//error handling here
+			break
 		}
-
-		fmt.Printf("Recieved message -> %s", string(message))
-
+		msg := string(data)
+		fmt.Printf("got message- %s\n", msg)
+		in <- msg
 	}
+	//need to visit close these channels and who should do it
+}
 
+func writeOutput(c net.Conn, out <-chan string) {
+
+	for {
+		for msg := range out {
+			_, err := io.WriteString(c, msg)
+			if err != nil {
+				//err handling here
+				break
+			}
+			fmt.Println("wrote message to user")
+		}
+	}
+	//need to visit close these channels and who should do it
 }
 
 type Lobby struct {
@@ -66,12 +99,18 @@ func NewLobby() Lobby {
 }
 
 type Client struct {
-	Name string
-	Conn net.Conn
+	Name     string
+	Conn     net.Conn
+	Incoming chan string
+	Outgoing chan string
 }
 
-func NewClient(conn net.Conn) *Client {
+func NewClient(conn net.Conn, i int) *Client {
+	names := []string{"justin", "riley", "cooper", "anonymous"}
 	return &Client{
-		Name: "justin", Conn: conn,
+		Name:     names[i],
+		Conn:     conn,
+		Incoming: make(chan string),
+		Outgoing: make(chan string),
 	}
 }

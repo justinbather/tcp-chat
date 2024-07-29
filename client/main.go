@@ -1,7 +1,6 @@
 package main
 
 import (
-	"fmt"
 	"net"
 )
 
@@ -14,12 +13,4 @@ func main() {
 
 	msg := []byte("Hello")
 	conn.Write(msg)
-
-	for {
-		rec := make([]byte, 1024)
-		conn.Read(rec)
-
-		fmt.Printf("recieved -> %s", string(rec))
-	}
-
 }
