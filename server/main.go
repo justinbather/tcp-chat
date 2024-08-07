@@ -1,9 +1,12 @@
 package main
 
 import (
+	"bufio"
 	"fmt"
 	"io"
 	"net"
+	"os"
+	"os/signal"
 )
 
 const MAX_CLIENTS int = 4
@@ -24,62 +27,85 @@ func main() {
 	if err != nil {
 		return
 	}
-
 	fmt.Println("Listening on TCP:8000")
-
 	defer listen.Close()
+
+	kill := make(chan os.Signal, 1)
+	signal.Notify(kill, os.Interrupt)
+
+	go func() {
+		<-kill
+		fmt.Println("shutting down")
+		for _, c := range clients {
+			c.Conn.Close()
+		}
+		listen.Close()
+		os.Exit(1)
+	}()
 
 	for {
 
 		conn, err := listen.Accept()
 		if err != nil {
+			fmt.Println("error accepting connection: ", err)
 			return
 		}
 
-		if totalClients+1 > MAX_CLIENTS {
+		fmt.Println("Accepted new connection")
 
+		if totalClients >= MAX_CLIENTS {
 			fmt.Println("Cant handle any more clients")
 			return
 		}
 
 		client := NewClient(conn, totalClients)
+		fmt.Println("new client :", client)
 
 		clients = append(clients, client)
 		totalClients++
 
-		handleConn(client)
+		go handleConn(client)
 	}
-
 }
 
 func handleConn(client *Client) {
 
+	defer func() {
+		close(client.Incoming)
+		close(client.Outgoing)
+		client.Conn.Close()
+		fmt.Printf("closed connection for %s", client.Name)
+	}()
 	//need to wire up recieving message and putting it into other clients outgoing chan
-	go writeOutput(client.Conn, client.Outgoing)
-	go readInput(client.Conn, client.Incoming)
-	fmt.Println("Go routines started for user", client.Name)
-}
 
-func readInput(c net.Conn, in chan<- string) {
-	for {
-		data, err := io.ReadAll(c)
-		if err != nil {
-			fmt.Println("error reading message", err)
-			//error handling here
-			break
-		}
-		msg := string(data)
-		fmt.Printf("got message- %s\n", msg)
-		in <- msg
+	// need to handle disconnect as well
+	go writeOutput(client)
+	go readInput(client)
+
+	for msg := range client.Incoming {
+		fmt.Printf("User %s sent: %s", client.Name, msg)
 	}
-	//need to visit close these channels and who should do it
 }
 
-func writeOutput(c net.Conn, out <-chan string) {
+func readInput(c *Client) {
+
+	reader := bufio.NewReader(c.Conn)
+	for {
+		msg, err := reader.ReadString('\n')
+		if err != nil {
+			fmt.Println("error reading input: ", err)
+			return
+		}
+		c.Incoming <- msg
+	}
+	//need to visit closing these channels and who should do it
+}
+
+func writeOutput(c *Client) {
 
 	for {
-		for msg := range out {
-			_, err := io.WriteString(c, msg)
+		for msg := range c.Outgoing {
+			_, err := io.WriteString(c.Conn, msg)
 			if err != nil {
 				//err handling here
 				break
