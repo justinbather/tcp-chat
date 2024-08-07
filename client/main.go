@@ -2,8 +2,9 @@ package main
 
 import (
 	"bufio"
+	"bytes"
+	"encoding/gob"
 	"fmt"
-	"io"
 	"net"
 	"os"
 	"os/signal"
@@ -30,6 +31,26 @@ func main() {
 		}
 	}()
 
+	go func() {
+		tmp := make([]byte, 1024)
+		for {
+			_, err := conn.Read(tmp)
+			if err != nil {
+				fmt.Println("error reading incoming message: ", err)
+				return
+			}
+
+			buf := bytes.NewBuffer(tmp)
+
+			dec := gob.NewDecoder(buf)
+
+			msg := Message{}
+
+			dec.Decode(&msg)
+			fmt.Printf("recieved message: %s from %s\n", msg.Content, msg.Sender)
+		}
+	}()
+
 run:
 	for {
 		select {
@@ -39,19 +60,23 @@ run:
 			panic("killing")
 
 		case text, ok := <-input:
-			fmt.Println("got message:", text)
 			if !ok {
 				fmt.Println("error sending message: ok", ok)
 				break run
 			}
-			written, err := io.WriteString(conn, text+"\n")
+			msg := Message{Content: text}
+			enc := gob.NewEncoder(conn)
+			err := enc.Encode(msg)
 			if err != nil {
 				fmt.Println("error sending message: ", err)
 				break run
 			}
-
-			fmt.Println("idk why its here, written -> ", written)
 		}
 
 	}
+}
+
+type Message struct {
+	Content string
+	Sender  string
 }

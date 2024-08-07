@@ -1,15 +1,18 @@
 package main
 
 import (
-	"bufio"
+	"bytes"
+	"encoding/gob"
 	"fmt"
-	"io"
 	"net"
 	"os"
 	"os/signal"
 )
 
-const MAX_CLIENTS int = 4
+const (
+	MAX_CLIENTS      int = 4
+	MAX_MESSAGE_SIZE     = 1024
+)
 
 // if we have a lobby which keeps an array of clients how should we keep the main thread open so we can accept new connections
 
@@ -18,12 +21,22 @@ const MAX_CLIENTS int = 4
 
 //or maybe just have the lobby loop over each client, writing to their conns
 
+// TODO:
+/*
+* clean this tf up
+* figure out gracefull closing of connections
+* maybe we can poll the server from the client in the background to detect a closingwith some sort of retry policy
+
+* work on broadcasting messages to all clients
+ */
 func main() {
 
 	totalClients := 0
 
-	clients := []*Client{}
+	lobby := NewLobby()
+	lobby.Clients = []*Client{}
 	listen, err := net.Listen("tcp", ":8000")
+
 	if err != nil {
 		return
 	}
@@ -36,7 +49,7 @@ func main() {
 	go func() {
 		<-kill
 		fmt.Println("shutting down")
-		for _, c := range clients {
+		for _, c := range lobby.Clients {
 			c.Conn.Close()
 		}
 		listen.Close()
@@ -61,15 +74,16 @@ func main() {
 		client := NewClient(conn, totalClients)
 		fmt.Println("new client :", client)
 
-		clients = append(clients, client)
+		lobby.Clients = append(lobby.Clients, client)
 		totalClients++
 
-		go handleConn(client)
+		go handleConn(client, lobby)
 	}
 }
 
-func handleConn(client *Client) {
+func handleConn(client *Client, l *Lobby) {
 
+	fmt.Printf("Lobby: %+v", l)
 	defer func() {
 		close(client.Incoming)
 		close(client.Outgoing)
@@ -83,19 +97,32 @@ func handleConn(client *Client) {
 	go readInput(client)
 
 	for msg := range client.Incoming {
-		fmt.Printf("User %s sent: %s", client.Name, msg)
+		fmt.Printf("User %s sent: %v", client.Name, msg)
+		l.broadcast(msg)
 	}
 }
 
 func readInput(c *Client) {
 
-	reader := bufio.NewReader(c.Conn)
+	tmp := make([]byte, MAX_MESSAGE_SIZE)
 	for {
-		msg, err := reader.ReadString('\n')
+		_, err := c.Conn.Read(tmp)
 		if err != nil {
 			fmt.Println("error reading input: ", err)
 			return
 		}
+		fmt.Println(tmp)
+
+		buf := bytes.NewBuffer(tmp)
+
+		dec := gob.NewDecoder(buf)
+
+		msg := Message{}
+
+		dec.Decode(&msg)
+
+		msg.Sender = c.Name
+
 		c.Incoming <- msg
 	}
 	//need to visit closing these channels and who should do it
@@ -105,9 +132,11 @@ func writeOutput(c *Client) {
 
 	for {
 		for msg := range c.Outgoing {
-			_, err := io.WriteString(c.Conn, msg)
+			enc := gob.NewEncoder(c.Conn)
+			err := enc.Encode(msg)
 			if err != nil {
 				//err handling here
+				fmt.Println("Error sending message: ", err)
 				break
 			}
 			fmt.Println("wrote message to user")
@@ -120,15 +149,23 @@ type Lobby struct {
 	Clients []*Client
 }
 
-func NewLobby() Lobby {
-	return Lobby{Clients: nil}
+func (l *Lobby) broadcast(msg Message) {
+	for _, c := range l.Clients {
+		if c.Name != msg.Sender {
+			c.Outgoing <- msg
+		}
+	}
+}
+
+func NewLobby() *Lobby {
+	return &Lobby{Clients: nil}
 }
 
 type Client struct {
 	Name     string
 	Conn     net.Conn
-	Incoming chan string
-	Outgoing chan string
+	Incoming chan Message
+	Outgoing chan Message
 }
 
 func NewClient(conn net.Conn, i int) *Client {
@@ -136,7 +173,12 @@ func NewClient(conn net.Conn, i int) *Client {
 	return &Client{
 		Name:     names[i],
 		Conn:     conn,
-		Incoming: make(chan string),
-		Outgoing: make(chan string),
+		Incoming: make(chan Message),
+		Outgoing: make(chan Message),
 	}
+}
+
+type Message struct {
+	Content string
+	Sender  string
 }
