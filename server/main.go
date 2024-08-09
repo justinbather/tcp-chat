@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/gob"
 	"fmt"
+	"io"
 	"net"
 	"os"
 	"os/signal"
@@ -31,31 +32,33 @@ const (
  */
 func main() {
 
-	totalClients := 0
-
-	lobby := NewLobby()
-	lobby.Clients = []*Client{}
-	listen, err := net.Listen("tcp", ":8000")
-
-	if err != nil {
-		return
-	}
-	fmt.Println("Listening on TCP:8000")
+	lobby, listen := initServer()
 	defer listen.Close()
 
 	kill := make(chan os.Signal, 1)
 	signal.Notify(kill, os.Interrupt)
 
-	go func() {
-		<-kill
-		fmt.Println("shutting down")
-		for _, c := range lobby.Clients {
-			c.Conn.Close()
-		}
-		listen.Close()
-		os.Exit(1)
-	}()
+	go processSigInt(kill)
 
+	run(listen, lobby)
+}
+
+func initServer() (*Lobby, net.Listener) {
+	lobby := NewLobby()
+	lobby.Clients = []*Client{}
+	listen, err := net.Listen("tcp", ":8000")
+	if err != nil {
+		fmt.Println("Error initializing server: ", err)
+		return nil, nil
+	}
+
+	fmt.Println("Listening on TCP:8000")
+
+	return lobby, listen
+}
+func run(listen net.Listener, lobby *Lobby) {
+
+	totalClients := 0
 	for {
 
 		conn, err := listen.Accept()
@@ -81,9 +84,19 @@ func main() {
 	}
 }
 
+func processSigInt(kill chan os.Signal) {
+
+	<-kill
+	fmt.Println("shutting down")
+	for _, c := range lobby.Clients {
+		c.Conn.Close()
+	}
+	//listen.Close()
+	os.Exit(1)
+}
+
 func handleConn(client *Client, l *Lobby) {
 
-	fmt.Printf("Lobby: %+v", l)
 	defer func() {
 		close(client.Incoming)
 		close(client.Outgoing)
@@ -108,6 +121,11 @@ func readInput(c *Client) {
 	for {
 		_, err := c.Conn.Read(tmp)
 		if err != nil {
+			if err == io.EOF {
+				fmt.Println("Client ended connection, recieved EOF. Gracefully closing connection")
+				c.Conn.Close()
+				return
+			}
 			fmt.Println("error reading input: ", err)
 			return
 		}
