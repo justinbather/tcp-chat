@@ -22,13 +22,9 @@ const (
 
 //or maybe just have the lobby loop over each client, writing to their conns
 
-// TODO:
-/*
+/*TODO:
 * clean this tf up
-* figure out gracefull closing of connections
-* maybe we can poll the server from the client in the background to detect a closingwith some sort of retry policy
-
-* work on broadcasting messages to all clients
+* - Not A Priority maybe we can poll the server from the client in the background to detect a closingwith some sort of retry policy
  */
 func main() {
 
@@ -57,9 +53,8 @@ func initServer() (*Lobby, net.Listener) {
 	return lobby, listen
 }
 
-func run(listen net.Listener, lobby *Lobby) {
+func run(listen net.Listener, l *Lobby) {
 
-	totalClients := 0
 	for {
 
 		conn, err := listen.Accept()
@@ -68,25 +63,26 @@ func run(listen net.Listener, lobby *Lobby) {
 			return
 		}
 
-		if totalClients >= MAX_CLIENTS {
+		if l.TotalClients >= MAX_CLIENTS {
 			fmt.Println("Cant handle any more clients")
 			return
 		}
 
 		fmt.Println("Accepted new connection")
 
-		client := processNewClient(lobby, conn, totalClients)
+		client := processNewClient(l, conn)
 
-		go handleConn(client, lobby)
+		go handleConn(client, l)
 	}
 }
 
-func processNewClient(l *Lobby, c net.Conn, totalClients int) *Client {
-	client := NewClient(c, totalClients)
+func processNewClient(l *Lobby, c net.Conn) *Client {
+	//This total clients param is temporary until we have clients specifing the name
+	client := NewClient(c, l.TotalClients)
 	fmt.Println("new client :", client)
 
 	l.Clients = append(l.Clients, client)
-	totalClients++
+	l.TotalClients++
 
 	return client
 }
@@ -111,8 +107,9 @@ func handleConn(c *Client, l *Lobby) {
 
 	for msg := range c.Incoming {
 		fmt.Printf("User %s sent: %v", c.Name, msg)
-		l.broadcast(msg)
+		l.Broadcast(msg)
 	}
+
 }
 
 func readInput(c *Client, l *Lobby) {
@@ -126,30 +123,20 @@ func readInput(c *Client, l *Lobby) {
 			} else {
 				fmt.Println("error reading input: ", err)
 			}
-			l.removeClient(c)
+			l.CancelClientConn(c)
 			return
 		}
 
 		buf := bytes.NewBuffer(tmp)
-
 		dec := gob.NewDecoder(buf)
-
 		msg := Message{}
-
 		dec.Decode(&msg)
-
 		msg.Sender = c.Name
-
 		c.Incoming <- msg
 	}
-	//need to visit closing these channels and who should do it
-}
-
-func removeClient(l *Lobby, c *Client) {
 }
 
 func writeOutput(c *Client) {
-
 	for {
 		for msg := range c.Outgoing {
 			enc := gob.NewEncoder(c.Conn)
@@ -162,14 +149,14 @@ func writeOutput(c *Client) {
 			fmt.Println("wrote message to user")
 		}
 	}
-	//need to visit close these channels and who should do it
 }
 
 type Lobby struct {
-	Clients []*Client
+	Clients      []*Client
+	TotalClients int
 }
 
-func (l *Lobby) broadcast(msg Message) {
+func (l *Lobby) Broadcast(msg Message) {
 	for _, c := range l.Clients {
 		if c.Name != msg.Sender {
 			c.Outgoing <- msg
@@ -178,21 +165,21 @@ func (l *Lobby) broadcast(msg Message) {
 }
 
 func NewLobby() *Lobby {
-	return &Lobby{Clients: nil}
+	return &Lobby{Clients: nil, TotalClients: 0}
+}
+
+func (l *Lobby) CancelClientConn(c *Client) {
+	c.closeChans()
+	l.removeClient(c)
+	fmt.Printf("Removed %s from the lobby", c.Name)
 }
 
 func (l *Lobby) removeClient(c *Client) {
-
 	for idx, client := range l.Clients {
 		if client.Name == c.Name {
 			l.Clients = append(l.Clients[:idx], l.Clients[idx+1:]...)
 		}
 	}
-
-	close(c.Incoming)
-	close(c.Outgoing)
-	fmt.Printf("Removed %s from the lobby", c.Name)
-	return
 }
 
 type Client struct {
@@ -210,6 +197,11 @@ func NewClient(conn net.Conn, i int) *Client {
 		Incoming: make(chan Message),
 		Outgoing: make(chan Message),
 	}
+}
+
+func (c *Client) closeChans() {
+	close(c.Incoming)
+	close(c.Outgoing)
 }
 
 type Message struct {
