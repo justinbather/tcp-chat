@@ -15,13 +15,6 @@ const (
 	MAX_MESSAGE_SIZE     = 1024
 )
 
-// if we have a lobby which keeps an array of clients how should we keep the main thread open so we can accept new connections
-
-// maybe we should create a thread for each client, and a thread for the lobby, so that if we get a message from a client on one thread
-// we can send the message into the lobby channel, which then can put it into each of the connected clients channels too?
-
-//or maybe just have the lobby loop over each client, writing to their conns
-
 /*TODO:
 * clean this tf up
 * - Not A Priority maybe we can poll the server from the client in the background to detect a closingwith some sort of retry policy
@@ -54,9 +47,7 @@ func initServer() (*Lobby, net.Listener) {
 }
 
 func run(listen net.Listener, l *Lobby) {
-
 	for {
-
 		conn, err := listen.Accept()
 		if err != nil {
 			fmt.Println("error accepting connection: ", err)
@@ -132,9 +123,24 @@ func readInput(c *Client, l *Lobby) {
 		msg := Message{}
 		dec.Decode(&msg)
 		msg.Sender = c.Name
-		c.Incoming <- msg
+
+		if isCommand(msg) {
+			processCommand(msg.Content, c)
+		} else {
+			c.Incoming <- msg
+		}
 	}
 }
+
+func isCommand(m Message) bool {
+	if m.Content[0] == '/' {
+		return true
+	}
+
+	return false
+}
+
+func processCommand(cmd string, c *Client) {}
 
 func writeOutput(c *Client) {
 	for {
@@ -156,16 +162,16 @@ type Lobby struct {
 	TotalClients int
 }
 
+func NewLobby() *Lobby {
+	return &Lobby{Clients: nil, TotalClients: 0}
+}
+
 func (l *Lobby) Broadcast(msg Message) {
 	for _, c := range l.Clients {
 		if c.Name != msg.Sender {
 			c.Outgoing <- msg
 		}
 	}
-}
-
-func NewLobby() *Lobby {
-	return &Lobby{Clients: nil, TotalClients: 0}
 }
 
 func (l *Lobby) CancelClientConn(c *Client) {
