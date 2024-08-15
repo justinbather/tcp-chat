@@ -7,4 +7,4 @@ TCP Group Chat app
 
 
 ## Client
-    - Test
+    - Test PAT
