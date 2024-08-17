@@ -8,11 +8,13 @@ import (
 	"net"
 	"os"
 	"os/signal"
+	"strings"
 )
 
 const (
 	MAX_CLIENTS      int = 4
 	MAX_MESSAGE_SIZE     = 1024
+	HELP_MSG             = "\n/help: lists all available commands.\n/create [lobby name]: creates a lobby name with the given name.\n/join [lobby name]: joins an exisiting lobby with the given name, if it exists.\n"
 )
 
 /*TODO:
@@ -35,6 +37,7 @@ func main() {
 func initServer() (*Lobby, net.Listener) {
 	lobby := NewLobby()
 	lobby.Clients = []*Client{}
+
 	listen, err := net.Listen("tcp", ":8000")
 	if err != nil {
 		fmt.Println("Error initializing server: ", err)
@@ -125,6 +128,7 @@ func readInput(c *Client, l *Lobby) {
 		msg.Sender = c.Name
 
 		if isCommand(msg) {
+			fmt.Println("Received command: ", msg.Content)
 			processCommand(msg.Content, c)
 		} else {
 			c.Incoming <- msg
@@ -140,7 +144,22 @@ func isCommand(m Message) bool {
 	return false
 }
 
-func processCommand(cmd string, c *Client) {}
+func processCommand(cmd string, c *Client) {
+	// parse command and do command
+	bulkCmd := strings.Split(cmd, "/")
+	switch bulkCmd[1] {
+	case "new":
+		fmt.Println("Creating new lobby")
+		break
+
+	case "help":
+		c.SendServerMessage(HELP_MSG)
+	default:
+		c.SendServerMessage("Not a valid command. try /help for a list of commands")
+		break
+
+	}
+}
 
 func writeOutput(c *Client) {
 	for {
@@ -208,6 +227,11 @@ func NewClient(conn net.Conn, i int) *Client {
 func (c *Client) closeChans() {
 	close(c.Incoming)
 	close(c.Outgoing)
+}
+
+func (c *Client) SendServerMessage(s string) {
+	msg := Message{Content: s, Sender: "Server"}
+	c.Outgoing <- msg
 }
 
 type Message struct {

@@ -56,7 +56,7 @@ func main() {
 			msg := Message{}
 
 			dec.Decode(&msg)
-			fmt.Printf("recieved message: %s from %s\n", msg.Content, msg.Sender)
+			fmt.Printf("\n%s:%s\n", msg.Sender, msg.Content)
 		}
 	}()
 
