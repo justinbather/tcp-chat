@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/signal"
 	"strings"
+	"time"
 )
 
 const (
@@ -16,6 +17,8 @@ const (
 	MAX_MESSAGE_SIZE     = 1024
 	HELP_MSG             = "\n/help: lists all available commands.\n/create [lobby name]: creates a lobby name with the given name.\n/join [lobby name]: joins an exisiting lobby with the given name, if it exists.\n"
 )
+
+var CURR_ID = 1
 
 /*TODO:
 * clean this tf up
@@ -44,7 +47,7 @@ func initServer() (*Lobby, net.Listener) {
 		return nil, nil
 	}
 
-	fmt.Println("Listening on TCP:8000")
+	fmt.Println("Listening on TCP:8001")
 
 	return lobby, listen
 }
@@ -98,6 +101,14 @@ func handleConn(c *Client, l *Lobby) {
 	// need to handle disconnect as well
 	go writeOutput(c)
 	go readInput(c, l)
+	go func() {
+		for {
+			time.Sleep(time.Second * 4)
+			l.Broadcast(ChatMsg{Content: "Hello from server", Sender: "Server", Id: CURR_ID})
+			CURR_ID++
+		}
+
+	}()
 
 	for msg := range c.Incoming {
 		fmt.Printf("User %s sent: %v", c.Name, msg)
@@ -123,9 +134,12 @@ func readInput(c *Client, l *Lobby) {
 
 		buf := bytes.NewBuffer(tmp)
 		dec := gob.NewDecoder(buf)
-		msg := Message{}
+		msg := ChatMsg{}
 		dec.Decode(&msg)
 		msg.Sender = c.Name
+
+		msg.Id = CURR_ID
+		CURR_ID++
 
 		if isCommand(msg) {
 			fmt.Println("Received command: ", msg.Content)
@@ -136,7 +150,11 @@ func readInput(c *Client, l *Lobby) {
 	}
 }
 
-func isCommand(m Message) bool {
+func isCommand(m ChatMsg) bool {
+	if len(m.Content) == 0 {
+		return false
+	}
+
 	if m.Content[0] == '/' {
 		return true
 	}
@@ -185,11 +203,9 @@ func NewLobby() *Lobby {
 	return &Lobby{Clients: nil, TotalClients: 0}
 }
 
-func (l *Lobby) Broadcast(msg Message) {
+func (l *Lobby) Broadcast(msg ChatMsg) {
 	for _, c := range l.Clients {
-		if c.Name != msg.Sender {
-			c.Outgoing <- msg
-		}
+		c.Outgoing <- msg
 	}
 }
 
@@ -210,8 +226,8 @@ func (l *Lobby) removeClient(c *Client) {
 type Client struct {
 	Name     string
 	Conn     net.Conn
-	Incoming chan Message
-	Outgoing chan Message
+	Incoming chan ChatMsg
+	Outgoing chan ChatMsg
 }
 
 func NewClient(conn net.Conn, i int) *Client {
@@ -219,8 +235,8 @@ func NewClient(conn net.Conn, i int) *Client {
 	return &Client{
 		Name:     names[i],
 		Conn:     conn,
-		Incoming: make(chan Message),
-		Outgoing: make(chan Message),
+		Incoming: make(chan ChatMsg),
+		Outgoing: make(chan ChatMsg),
 	}
 }
 
@@ -230,11 +246,12 @@ func (c *Client) closeChans() {
 }
 
 func (c *Client) SendServerMessage(s string) {
-	msg := Message{Content: s, Sender: "Server"}
+	msg := ChatMsg{Content: s, Sender: "Server", Id: CURR_ID}
 	c.Outgoing <- msg
 }
 
-type Message struct {
+type ChatMsg struct {
 	Content string
 	Sender  string
+	Id      int
 }

@@ -25,6 +25,8 @@ func main() {
 		panic(err)
 	}
 
+	fmt.Print("\033[H\033[2J")
+
 	defer conn.Close()
 
 	input := make(chan string)
@@ -34,55 +36,61 @@ func main() {
 
 	go readKeyboardInput(input)
 
-	go func() {
-		tmp := make([]byte, 1024)
-		for {
-			_, err := conn.Read(tmp)
-			if err != nil {
-				if err == io.EOF {
-					fmt.Printf("Lobby has been closed, quitting session")
-					//TODO this is pretty ugly, probably a better way to do this
-					kill <- os.Interrupt
-				} else {
-					fmt.Println("error reading incoming message: ", err)
-				}
-				return
-			}
+	go processIncoming(conn, kill)
 
-			buf := bytes.NewBuffer(tmp)
+	run(conn, input, kill)
+}
 
-			dec := gob.NewDecoder(buf)
-
-			msg := Message{}
-
-			dec.Decode(&msg)
-			fmt.Printf("\n%s:%s\n", msg.Sender, msg.Content)
-		}
+func run(conn net.Conn, input chan string, kill chan os.Signal) {
+	defer func() {
+		close(input)
 	}()
 
-run:
 	for {
 		select {
 		case <-kill:
 			fmt.Println("Recieved SIGINT, quitting")
-			close(input)
-			panic("killing")
+			//close(input)
+			//panic("killing")
+			return
 
-		case text, ok := <-input:
-			if !ok {
-				fmt.Println("error sending message: ok", ok)
-				break run
-			}
+		case text := <-input:
 			msg := Message{Content: text}
 			enc := gob.NewEncoder(conn)
 			err := enc.Encode(msg)
 			if err != nil {
 				fmt.Println("error sending message: ", err)
-				break run
+				continue
 			}
 		}
-
 	}
+}
+
+func processIncoming(conn net.Conn, kill chan os.Signal) {
+	tmp := make([]byte, 1024)
+	for {
+		_, err := conn.Read(tmp)
+		if err != nil {
+			if err == io.EOF {
+				fmt.Printf("Lobby has been closed, quitting session")
+				//TODO this is pretty ugly, probably a better way to do this
+				kill <- os.Interrupt
+			} else {
+				fmt.Println("error reading incoming message: ", err)
+			}
+			return
+		}
+
+		buf := bytes.NewBuffer(tmp)
+
+		dec := gob.NewDecoder(buf)
+
+		msg := Message{}
+
+		dec.Decode(&msg)
+		fmt.Printf("\n%s:%s\n", msg.Sender, msg.Content)
+	}
+
 }
 
 func readKeyboardInput(input chan string) {
