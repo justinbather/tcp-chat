@@ -112,7 +112,11 @@ func handleConn(c *Client, l *Lobby) {
 
 	for msg := range c.Incoming {
 		fmt.Printf("User %s sent: %s", msg.Sender, msg.Content)
-		l.Broadcast(msg)
+		if len(msg.Content) == 0 {
+			fmt.Println("Stopped empty message from being sent by ", msg.Sender)
+		} else {
+			l.Broadcast(msg)
+		}
 	}
 
 }
