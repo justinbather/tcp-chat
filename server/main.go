@@ -9,7 +9,6 @@ import (
 	"os"
 	"os/signal"
 	"strings"
-	"time"
 )
 
 const (
@@ -101,17 +100,18 @@ func handleConn(c *Client, l *Lobby) {
 	// need to handle disconnect as well
 	go writeOutput(c)
 	go readInput(c, l)
-	go func() {
-		for {
-			time.Sleep(time.Second * 4)
-			l.Broadcast(ChatMsg{Content: "Hello from server", Sender: "Server", Id: CURR_ID})
-			CURR_ID++
-		}
+	// mock repeated messages to clients
+	//go func() {
+	//for {
+	//	time.Sleep(time.Second * 4)
+	//	l.Broadcast(ChatMsg{Content: "Hello from server", Sender: "Server", Id: CURR_ID})
+	//	CURR_ID++
+	//}
 
-	}()
+	//}()
 
 	for msg := range c.Incoming {
-		fmt.Printf("User %s sent: %v", c.Name, msg)
+		fmt.Printf("User %s sent: %s", msg.Sender, msg.Content)
 		l.Broadcast(msg)
 	}
 
@@ -136,7 +136,7 @@ func readInput(c *Client, l *Lobby) {
 		dec := gob.NewDecoder(buf)
 		msg := ChatMsg{}
 		dec.Decode(&msg)
-		msg.Sender = c.Name
+		//msg.Sender = c.Name
 
 		msg.Id = CURR_ID
 		CURR_ID++
