@@ -97,27 +97,14 @@ func handleConn(c *Client, l *Lobby) {
 		fmt.Printf("closed connection for %s", c.Name)
 	}()
 
-	// need to handle disconnect as well
 	go writeOutput(c)
 	go readInput(c, l)
-	// mock repeated messages to clients
-	//go func() {
-	//for {
-	//	time.Sleep(time.Second * 4)
-	//	l.Broadcast(ChatMsg{Content: "Hello from server", Sender: "Server", Id: CURR_ID})
-	//	CURR_ID++
-	//}
-
-	//}()
 
 	for msg := range c.Incoming {
 		fmt.Printf("User %s sent: %s", msg.Sender, msg.Content)
-		if len(msg.Content) == 0 {
-			fmt.Println("Stopped empty message from being sent by ", msg.Sender)
-		} else {
+		if len(msg.Content) > 0 {
 			l.Broadcast(msg)
 		}
-
 	}
 
 }
