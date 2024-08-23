@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"encoding/gob"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -67,14 +68,92 @@ func run(listen net.Listener, l *Lobby) {
 		fmt.Println("Accepted new connection")
 
 		client := processNewClient(l, conn)
+		if client == nil {
+			continue
+		}
 
 		go handleConn(client, l)
 	}
 }
 
+type TcpCmd struct {
+	Type string
+}
+
+type AuthResp struct {
+	Username string
+}
+
+func sendAuthCmd(conn net.Conn) {
+	fmt.Println("Sending Auth command")
+	enc := gob.NewEncoder(conn)
+	err := enc.Encode(TcpCmd{"NEED_AUTH"})
+	if err != nil {
+		//err handling here
+		fmt.Println("Error sending message: ", err)
+	}
+	fmt.Println("Sent client command to supply auth")
+
+}
+
+func waitForAuth(conn net.Conn) (string, error) {
+	fmt.Println("Waiting for Auth Response from Client")
+	tmp := make([]byte, MAX_MESSAGE_SIZE)
+	for {
+		_, err := conn.Read(tmp)
+		if err != nil {
+			if err == io.EOF {
+				fmt.Println("Client ended connection, recieved EOF. Gracefully closing connection")
+			} else {
+				fmt.Println("error reading input: ", err)
+			}
+			return "", errors.New("Cant authenticate response")
+		}
+
+		buf := bytes.NewBuffer(tmp)
+		dec := gob.NewDecoder(buf)
+		msg := AuthResp{}
+		dec.Decode(&msg)
+		fmt.Println(msg)
+
+		if msg.Username == "" {
+			return "", errors.New("Cant authenticate response")
+		}
+		return msg.Username, nil
+	}
+
+}
+
+func performHandshake(_ *Client) error {
+
+	/*
+		fmt.Println("Starting auth handshake")
+		sendAuthCmd(c.Conn)
+		authData, err := waitForAuth(c.Conn)
+		if err != nil {
+			return err
+		}
+
+		c.Name = authData
+	*/
+
+	return nil
+}
+
 func processNewClient(l *Lobby, c net.Conn) *Client {
 	//This total clients param is temporary until we have clients specifing the name
-	client := NewClient(c, l.TotalClients)
+	client := NewClient(c)
+	client.Name = "Justin"
+	fmt.Println("Requesting client provides Auth")
+
+	err := performHandshake(client)
+	if err != nil {
+		client.SendServerMessage("Authentication Error")
+		client.closeChans()
+		c.Close()
+		return nil
+	}
+
 	fmt.Println("new client :", client)
 
 	l.Clients = append(l.Clients, client)
@@ -97,8 +176,13 @@ func handleConn(c *Client, l *Lobby) {
 		fmt.Printf("closed connection for %s", c.Name)
 	}()
 
+	// this is BUGGIN, fs up when we try to send a server message
+
 	go writeOutput(c)
 	go readInput(c, l)
+
+	// OH, without the goroutines running we cant send anuthing silly
+	// c.Outgoing <- ChatMsg{Sender: "Server", Content: "Hello", Id: 10}
 
 	for msg := range c.Incoming {
 		fmt.Printf("User %s sent: %s", msg.Sender, msg.Content)
@@ -222,10 +306,8 @@ type Client struct {
 	Outgoing chan ChatMsg
 }
 
-func NewClient(conn net.Conn, i int) *Client {
-	names := []string{"justin", "riley", "cooper", "anonymous"}
+func NewClient(conn net.Conn) *Client {
 	return &Client{
-		Name:     names[i],
 		Conn:     conn,
 		Incoming: make(chan ChatMsg),
 		Outgoing: make(chan ChatMsg),
@@ -238,6 +320,7 @@ func (c *Client) closeChans() {
 }
 
 func (c *Client) SendServerMessage(s string) {
+	fmt.Printf("Sending server message: %s", s)
 	msg := ChatMsg{Content: s, Sender: "Server", Id: CURR_ID}
 	c.Outgoing <- msg
 }
