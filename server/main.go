@@ -124,18 +124,16 @@ func waitForAuth(conn net.Conn) (string, error) {
 
 }
 
-func performHandshake(_ *Client) error {
+func performHandshake(c *Client) error {
 
-	/*
-		fmt.Println("Starting auth handshake")
-		sendAuthCmd(c.Conn)
-		authData, err := waitForAuth(c.Conn)
-		if err != nil {
-			return err
-		}
+	fmt.Println("Starting auth handshake")
+	sendAuthCmd(c.Conn)
+	authData, err := waitForAuth(c.Conn)
+	if err != nil {
+		return err
+	}
 
-		c.Name = authData
-	*/
+	c.Name = authData
 
 	return nil
 }
@@ -145,14 +143,6 @@ func processNewClient(l *Lobby, c net.Conn) *Client {
 	client := NewClient(c)
 	client.Name = "Justin"
 	fmt.Println("Requesting client provides Auth")
-
-	err := performHandshake(client)
-	if err != nil {
-		client.SendServerMessage("Authentication Error")
-		client.closeChans()
-		c.Close()
-		return nil
-	}
 
 	fmt.Println("new client :", client)
 
@@ -177,6 +167,12 @@ func handleConn(c *Client, l *Lobby) {
 	}()
 
 	// this is BUGGIN, fs up when we try to send a server message
+	err := performHandshake(c)
+	if err != nil {
+		c.SendServerMessage("Authentication Error")
+		c.closeChans()
+		return
+	}
 
 	go writeOutput(c)
 	go readInput(c, l)
@@ -319,10 +315,24 @@ func (c *Client) closeChans() {
 	close(c.Outgoing)
 }
 
-func (c *Client) SendServerMessage(s string) {
+func (c *Client) writeChatMsg(msg ChatMsg) error {
+	enc := gob.NewEncoder(c.Conn)
+	err := enc.Encode(msg)
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
+func (c *Client) SendServerMessage(s string) error {
 	fmt.Printf("Sending server message: %s", s)
-	msg := ChatMsg{Content: s, Sender: "Server", Id: CURR_ID}
-	c.Outgoing <- msg
+	err := c.writeChatMsg(ChatMsg{Sender: "Server", Content: s, Id: 100})
+
+	if err != nil {
+		return err
+	}
+
+	return nil
 }
 
 type ChatMsg struct {
