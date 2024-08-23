@@ -24,6 +24,15 @@ var CURR_ID = 1
 * clean this tf up
 * - Not A Priority maybe we can poll the server from the client in the background to detect a closingwith some sort of retry policy
  */
+
+/*
+func init() {
+
+		gob.Register(ChatMsg{})
+		gob.Register(TcpCmd{})
+		gob.Register(BaseMsg{})
+	}
+*/
 func main() {
 
 	lobby, listen := initServer()
@@ -76,18 +85,31 @@ func run(listen net.Listener, l *Lobby) {
 	}
 }
 
-type TcpCmd struct {
+// In the process of creating this master type, will need to be protected behind methods so we dont create
+// a message with more than one inner messages
+type Message struct {
+	Type string
+	TcpCmd
+	ChatMsg
+}
+
+type BaseMsg struct {
 	Type string
 }
 
-type AuthResp struct {
+type TcpCmd struct {
+	BaseMsg
+	Cmd string
+}
+
+type CmdResp struct {
 	Username string
 }
 
 func sendAuthCmd(conn net.Conn) {
 	fmt.Println("Sending Auth command")
 	enc := gob.NewEncoder(conn)
-	err := enc.Encode(TcpCmd{"NEED_AUTH"})
+	err := enc.Encode(TcpCmd{BaseMsg: BaseMsg{Type: "CmdMsg"}, Cmd: "NEED_AUTH"})
 	if err != nil {
 		//err handling here
 		fmt.Println("Error sending message: ", err)
@@ -112,7 +134,7 @@ func waitForAuth(conn net.Conn) (string, error) {
 
 		buf := bytes.NewBuffer(tmp)
 		dec := gob.NewDecoder(buf)
-		msg := AuthResp{}
+		msg := CmdResp{}
 		dec.Decode(&msg)
 		fmt.Println(msg)
 
@@ -326,7 +348,7 @@ func (c *Client) writeChatMsg(msg ChatMsg) error {
 
 func (c *Client) SendServerMessage(s string) error {
 	fmt.Printf("Sending server message: %s", s)
-	err := c.writeChatMsg(ChatMsg{Sender: "Server", Content: s, Id: 100})
+	err := c.writeChatMsg(ChatMsg{BaseMsg: BaseMsg{Type: "ChatMsg"}, Sender: "Server", Content: s, Id: 100})
 
 	if err != nil {
 		return err
@@ -336,6 +358,7 @@ func (c *Client) SendServerMessage(s string) error {
 }
 
 type ChatMsg struct {
+	BaseMsg
 	Content string
 	Sender  string
 	Id      int
