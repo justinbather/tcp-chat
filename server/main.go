@@ -92,11 +92,12 @@ type Message struct {
 }
 
 func NewTcpCmd(cmd string) Message {
-	return Message{Type: "TcpCmd", TcpCmd: TcpCmd{cmd}}
+	return Message{Type: "TcpCmd", TcpCmd: TcpCmd{Cmd: cmd}}
 }
 
 type TcpCmd struct {
-	Cmd string
+	Cmd  string
+	Data string
 }
 
 type ChatMsg struct {
@@ -125,6 +126,19 @@ func sendAuthCmd(conn net.Conn) {
 
 }
 
+func sendAck(conn net.Conn) error {
+	fmt.Println("Sending ACK")
+	enc := gob.NewEncoder(conn)
+	err := enc.Encode(NewTcpCmd("AUTH_ACK"))
+	if err != nil {
+		fmt.Println("Error sending ACK: ", err)
+		return err
+	}
+	fmt.Println("Ack Sent, Client Authenticated")
+	return nil
+}
+
+// TODO: This writing message is duplicated, refactor
 func waitForAuth(conn net.Conn) (string, error) {
 	fmt.Println("Waiting for Auth Response from Client")
 	tmp := make([]byte, MAX_MESSAGE_SIZE)
@@ -141,30 +155,35 @@ func waitForAuth(conn net.Conn) (string, error) {
 
 		buf := bytes.NewBuffer(tmp)
 		dec := gob.NewDecoder(buf)
-		msg := CmdResp{}
+		msg := Message{}
 		dec.Decode(&msg)
 		fmt.Println(msg)
 
-		if msg.Username == "" {
+		//TODO: UGLY
+		if msg.Type != "TcpCmd" || msg.TcpCmd.Cmd != "AUTH_RESP" || msg.TcpCmd.Data == "" {
 			return "", errors.New("Cant authenticate response")
 		}
-		return msg.Username, nil
+
+		// Data is username string for now
+		return msg.TcpCmd.Data, nil
 	}
 
 }
 
-func performHandshake(c *Client) error {
+func performHandshake(c *Client) (string, error) {
 
 	fmt.Println("Starting auth handshake")
 	sendAuthCmd(c.Conn)
 	authData, err := waitForAuth(c.Conn)
 	if err != nil {
-		return err
+		return "", err
+	}
+	err = sendAck(c.Conn)
+	if err != nil {
+		return "", err
 	}
 
-	c.Name = authData
-
-	return nil
+	return authData, nil
 }
 
 func processNewClient(l *Lobby, c net.Conn) *Client {
@@ -196,12 +215,16 @@ func handleConn(c *Client, l *Lobby) {
 	}()
 
 	// this is BUGGIN, fs up when we try to send a server message
-	err := performHandshake(c)
+	authData, err := performHandshake(c)
 	if err != nil {
+		fmt.Println("Auth handshake failed, killing connection and channels")
 		c.SendServerMessage("Authentication Error")
 		c.closeChans()
 		return
 	}
+
+	//TODO: Just sending username to test auth flow, this will change to getting user data from user and pass, returning all data to client
+	c.Name = authData
 
 	go writeOutput(c)
 	go readInput(c, l)
