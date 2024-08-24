@@ -25,14 +25,12 @@ var CURR_ID = 1
 * - Not A Priority maybe we can poll the server from the client in the background to detect a closingwith some sort of retry policy
  */
 
-/*
 func init() {
 
-		gob.Register(ChatMsg{})
-		gob.Register(TcpCmd{})
-		gob.Register(BaseMsg{})
-	}
-*/
+	gob.Register(ChatMsg{})
+	gob.Register(TcpCmd{})
+	gob.Register(Message{})
+}
 func main() {
 
 	lobby, listen := initServer()
@@ -93,13 +91,22 @@ type Message struct {
 	ChatMsg
 }
 
-type BaseMsg struct {
-	Type string
+func NewTcpCmd(cmd string) Message {
+	return Message{Type: "TcpCmd", TcpCmd: TcpCmd{cmd}}
 }
 
 type TcpCmd struct {
-	BaseMsg
 	Cmd string
+}
+
+type ChatMsg struct {
+	Content string
+	Sender  string
+	Id      int
+}
+
+func NewChatMsg(c string, s string, id int) Message {
+	return Message{Type: "ChatMsg", ChatMsg: ChatMsg{Content: c, Sender: s, Id: id}}
 }
 
 type CmdResp struct {
@@ -109,7 +116,7 @@ type CmdResp struct {
 func sendAuthCmd(conn net.Conn) {
 	fmt.Println("Sending Auth command")
 	enc := gob.NewEncoder(conn)
-	err := enc.Encode(TcpCmd{BaseMsg: BaseMsg{Type: "CmdMsg"}, Cmd: "NEED_AUTH"})
+	err := enc.Encode(NewTcpCmd("NEED_AUTH"))
 	if err != nil {
 		//err handling here
 		fmt.Println("Error sending message: ", err)
@@ -228,7 +235,7 @@ func readInput(c *Client, l *Lobby) {
 
 		buf := bytes.NewBuffer(tmp)
 		dec := gob.NewDecoder(buf)
-		msg := ChatMsg{}
+		msg := Message{}
 		dec.Decode(&msg)
 		//msg.Sender = c.Name
 
@@ -236,20 +243,20 @@ func readInput(c *Client, l *Lobby) {
 		CURR_ID++
 
 		if isCommand(msg) {
-			fmt.Println("Received command: ", msg.Content)
-			processCommand(msg.Content, c)
+			fmt.Println("Received command: ", msg.ChatMsg.Content)
+			processCommand(msg.ChatMsg.Content, c)
 		} else {
 			c.Incoming <- msg
 		}
 	}
 }
 
-func isCommand(m ChatMsg) bool {
-	if len(m.Content) == 0 {
+func isCommand(m Message) bool {
+	if len(m.ChatMsg.Content) == 0 {
 		return false
 	}
 
-	if m.Content[0] == '/' {
+	if m.ChatMsg.Content[0] == '/' {
 		return true
 	}
 
@@ -297,7 +304,7 @@ func NewLobby() *Lobby {
 	return &Lobby{Clients: nil, TotalClients: 0}
 }
 
-func (l *Lobby) Broadcast(msg ChatMsg) {
+func (l *Lobby) Broadcast(msg Message) {
 	for _, c := range l.Clients {
 		c.Outgoing <- msg
 	}
@@ -320,15 +327,15 @@ func (l *Lobby) removeClient(c *Client) {
 type Client struct {
 	Name     string
 	Conn     net.Conn
-	Incoming chan ChatMsg
-	Outgoing chan ChatMsg
+	Incoming chan Message
+	Outgoing chan Message
 }
 
 func NewClient(conn net.Conn) *Client {
 	return &Client{
 		Conn:     conn,
-		Incoming: make(chan ChatMsg),
-		Outgoing: make(chan ChatMsg),
+		Incoming: make(chan Message),
+		Outgoing: make(chan Message),
 	}
 }
 
@@ -337,7 +344,7 @@ func (c *Client) closeChans() {
 	close(c.Outgoing)
 }
 
-func (c *Client) writeChatMsg(msg ChatMsg) error {
+func (c *Client) writeChatMsg(msg Message) error {
 	enc := gob.NewEncoder(c.Conn)
 	err := enc.Encode(msg)
 	if err != nil {
@@ -348,18 +355,11 @@ func (c *Client) writeChatMsg(msg ChatMsg) error {
 
 func (c *Client) SendServerMessage(s string) error {
 	fmt.Printf("Sending server message: %s", s)
-	err := c.writeChatMsg(ChatMsg{BaseMsg: BaseMsg{Type: "ChatMsg"}, Sender: "Server", Content: s, Id: 100})
+	err := c.writeChatMsg(NewChatMsg(s, "Server", CURR_ID))
 
 	if err != nil {
 		return err
 	}
 
 	return nil
-}
-
-type ChatMsg struct {
-	BaseMsg
-	Content string
-	Sender  string
-	Id      int
 }
