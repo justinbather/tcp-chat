@@ -170,22 +170,6 @@ func waitForAuth(conn net.Conn) (string, error) {
 
 }
 
-func performHandshake(c *Client) (string, error) {
-
-	fmt.Println("Starting auth handshake")
-	sendAuthCmd(c.Conn)
-	authData, err := waitForAuth(c.Conn)
-	if err != nil {
-		return "", err
-	}
-	err = sendAck(c.Conn)
-	if err != nil {
-		return "", err
-	}
-
-	return authData, nil
-}
-
 func processNewClient(l *Lobby, c net.Conn) *Client {
 	//This total clients param is temporary until we have clients specifing the name
 	client := NewClient(c)
@@ -206,6 +190,22 @@ func captureSigInt(kill chan os.Signal) {
 	os.Exit(1)
 }
 
+func handshake(conn net.Conn) (string, error) {
+	authData, err := waitForAuth(conn)
+	if err != nil {
+		fmt.Println("Error reading auth response")
+		return "", err
+	}
+	err = sendAck(conn)
+	if err != nil {
+		fmt.Println("Error sending auth ack")
+		return "", err
+	}
+
+	return authData, nil
+
+}
+
 func handleConn(c *Client, l *Lobby) {
 
 	defer func() {
@@ -214,13 +214,9 @@ func handleConn(c *Client, l *Lobby) {
 		fmt.Printf("closed connection for %s", c.Name)
 	}()
 
-	// this is BUGGIN, fs up when we try to send a server message
-	authData, err := performHandshake(c)
+	authData, err := handshake(c.Conn)
 	if err != nil {
-		fmt.Println("Auth handshake failed, killing connection and channels")
-		c.SendServerMessage("Authentication Error")
-		c.closeChans()
-		return
+		fmt.Printf("Error completing tcp handshake. error: %s", err)
 	}
 
 	//TODO: Just sending username to test auth flow, this will change to getting user data from user and pass, returning all data to client
